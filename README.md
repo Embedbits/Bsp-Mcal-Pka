@@ -15,7 +15,20 @@ This README is the landing page and the **specification of the interface** (mast
 own README with everything that is specific to the family: the instances of the device, their settings and the status of
 the implementation.
 
-> **Status: design.** No implementation exists yet, the interface below is a proposal. Stories and branches follow.
+> **Status: implementation (branch `Dev/STM32H5`).** The STM32H5 family is implemented: modular
+> arithmetic, RSA exponentiation (normal / fast / protected) and the CRT variant, ECC scalar
+> multiplication, point check, complete addition, ECDSA sign and verify, using the real PKA
+> register / RAM protocol of RM0481/RM0492/RM0517. Every `Pka_Set_*` operation of this
+> implementation finishes synchronously inside its call (see the deviation note in `Pka.c`)
+> instead of the asynchronous flow described below; the configured complete callback is still
+> invoked. On STM32H503 (no PKA peripheral) every function checks `defined(PKA)` and
+> returns `PKA_REQUEST_ERROR`. Unit tests run (host, Unity/CMock/RegMem) on the 12 STM32H5 lines;
+> integration tests run on NUCLEO-H563ZI (limited mode: only the ECDSA verification), NUCLEO-H533RE (full mode) and
+> NUCLEO-H503RB (no PKA, ignored). Their ECDSA P-256 and
+> RSA-512 known-answer vectors are not official NIST CAVP vectors (not available to this change);
+> they are self-consistent vectors generated and cross-checked by a from-scratch Python P-256 /
+> RSA reference written for the tests, using the real curve, the real algorithm, and real
+> probable primes - see the file header of `Tests/IntegrationTests/ItTest_Pka.c`.
 
 ---
 
@@ -86,7 +99,7 @@ master.
 
 | Family | Branch | Peripheral | Status |
 |---|---|---|---|
-| STM32H5 | `Dev/STM32H5` | `PKA` on STM32H533, H543, H553, H573, H5E and H5F: RSA / DH operands up to 4160 bits, ECC operands up to 640 bits, RSA exponentiation and CRT, ECC scalar multiplication, point check, complete addition, double base ladder, ECDSA sign and verify, modular and plain arithmetic, protection against the side-channel attacks for the operations with a secret | planned (first) |
+| STM32H5 | `Dev/STM32H5` | `PKA` on every STM32H5 line except H503 (confirmed in `availability_STM32H5.md`): RSA / DH operands up to 4160 bits, ECC operands up to 640 bits, RSA exponentiation and CRT, ECC scalar multiplication, point check, complete addition, ECDSA sign and verify, modular and plain arithmetic, protection against the side-channel attacks for the operations with a secret. On H503 every function only returns `PKA_REQUEST_ERROR` (`defined(PKA)` check). H523/543/562/563xx restrict the hardware itself to ECDSA verification only (RM0481 41.3, "limited mode"): `Pka_Get_Capability` reports only `PKA_OPERATION_ECDSA_VERIFY` there, the other operations are rejected by the hardware. | implemented |
 | STM32U5 | `Dev/STM32U5` | `PKA` on the lines that have it | planned |
 | STM32U3 | `Dev/STM32U3` | device dependent | planned |
 | STM32F4, STM32F7, STM32G4, STM32H7, STM32L4 | `Dev/STM32F4` ... | no public key accelerator on the device - the module is a stub that returns `PKA_REQUEST_ERROR` | planned |
@@ -217,7 +230,7 @@ const pka_RsaCrtRequest_t request =
 
 - **Rcc** - peripheral clock and reset
 - **Nvic** - interrupt of the peripheral
-- **Rng** - (the caller) the random number `k` of the ECDSA
+- **Rng** - (the caller) the random number `k` of the ECDSA; the RNG has to be clocked and enabled (`Rng_Init`, `Rng_Set_ExecActive`) before `Pka_Init`, otherwise PKA_SR.INITOK is never set (RM0481 PKA_SR.INITOK)
 - **RAL (Register Abstraction Layer)** - used internally to access the registers
 
 All mandatory RCC and NVIC configurations are handled internally.
