@@ -15,7 +15,32 @@ This README is the landing page and the **specification of the interface** (mast
 own README with everything that is specific to the family: the instances of the device, their settings and the status of
 the implementation.
 
-> **Status: design.** No implementation exists yet, the interface below is a proposal. Stories and branches follow.
+> **Status (STM32H7, branch `Dev/STM32H7`): implemented.** Port of the STM32H5 module to the PKA of the STM32H7R / STM32H7S
+> lines (Ral family STM32H7RS, RM0477 chapter 40 - the same register / RAM protocol, the same RAM offsets of every operation
+> and the same MODE codes as RM0481 / RM0492 / RM0517 of STM32H5, compared table by table): modular arithmetic, RSA
+> exponentiation (normal / fast / protected) and the CRT variant, ECC scalar multiplication, point check, complete addition,
+> ECDSA sign and verify. Every `Pka_Set_*` operation finishes synchronously inside its call (see the deviation note in
+> `Pka.c`); the configured complete callback is still invoked. The classic STM32H7 lines have no PKA: every function checks
+> `defined(PKA)` and returns `PKA_REQUEST_ERROR`. The module compiles without warnings for the 22 STM32H7 lines, for the
+> Cortex-M4 of the 6 dual-core lines and for the 4 STM32H7R / STM32H7S lines. Unit tests (Unity + CMock + RegMem, 25 test
+> cases) pass on STM32H723, H743, H755, H7A3, H7B3 (the case of a line without the PKA), STM32H7R3 (limited mode) and
+> STM32H7S7 (full PKA). Integration tests: the firmware builds for every STM32H7 and STM32H7R / STM32H7S preset (the
+> STM32H7R / H7S firmware fits the 64 KB flash); on NUCLEO-H723ZG, NUCLEO-H7A3ZI-Q and NUCLEO-H755ZI-Q (no PKA) the 8 cases
+> are ignored; the run on a board with the PKA (NUCLEO-H7S3L8) is pending - the board is not on the IT agent.
+>
+> **STM32H7 specifics:**
+>
+> - **Limited mode on STM32H7R3 / H7R7.** The datasheet DS14360 (sections 1 and 3.32: "public key accelerator, with ECC
+>   verification feature only") restricts the PKA of STM32H7R3 / H7R7 to the ECDSA verification (PKA_SR.LMF = 1):
+>   `Pka_Get_Capability` reports only `PKA_OPERATION_ECDSA_VERIFY` there, the other operations are rejected by the
+>   hardware. STM32H7S3 / H7S7 have the full PKA.
+> - **RNG.** As on STM32H5, the PKA initialization needs the clocked and initialized RNG (RM0477 40.3.6: INITOK stays 0
+>   otherwise); the application initializes the Rng module before `Pka_Init`.
+> - **Device errata of the STM32H7R / STM32H7S lines (bug AB#2328).** ES0596 Rev 10 2.2.4 "Incorrect backup domain reset"
+>   (no fix planned): a missed backup domain reset may raise an unexpected tamper event which prevents the access to the
+>   PKA; the module cannot detect it, a blocked PKA is reported by `PKA_REQUEST_ERROR` of `Pka_Init` (INITOK not set) or of
+>   the operation. Workaround in the supply (VBAT below 100 mV for more than 200 ms before a new power-on) or a backup
+>   domain reset by the application. ES0596 lists no other PKA erratum.
 
 ---
 
@@ -86,10 +111,11 @@ master.
 
 | Family | Branch | Peripheral | Status |
 |---|---|---|---|
-| STM32H5 | `Dev/STM32H5` | `PKA` on STM32H533, H543, H553, H573, H5E and H5F: RSA / DH operands up to 4160 bits, ECC operands up to 640 bits, RSA exponentiation and CRT, ECC scalar multiplication, point check, complete addition, double base ladder, ECDSA sign and verify, modular and plain arithmetic, protection against the side-channel attacks for the operations with a secret | planned (first) |
+| STM32H5 | `Dev/STM32H5` | `PKA` on every STM32H5 line except H503 (confirmed in `availability_STM32H5.md`): RSA / DH operands up to 4160 bits, ECC operands up to 640 bits, RSA exponentiation and CRT, ECC scalar multiplication, point check, complete addition, ECDSA sign and verify, modular and plain arithmetic, protection against the side-channel attacks for the operations with a secret. On H503 every function only returns `PKA_REQUEST_ERROR` (`defined(PKA)` check). H523/543/562/563xx restrict the hardware itself to ECDSA verification only (RM0481 41.3, "limited mode"): `Pka_Get_Capability` reports only `PKA_OPERATION_ECDSA_VERIFY` there, the other operations are rejected by the hardware. | implemented |
+| STM32H7 | `Dev/STM32H7` | `PKA` on the STM32H7R / STM32H7S lines (Ral family STM32H7RS, RM0477; the same register / RAM protocol as STM32H5): as STM32H5. STM32H7R3 / H7R7 restrict the hardware to the ECDSA verification (datasheet DS14360, limited mode): `Pka_Get_Capability` reports only `PKA_OPERATION_ECDSA_VERIFY` there. The classic STM32H7 lines have no PKA: every function only returns `PKA_REQUEST_ERROR` (`defined(PKA)` check). | implemented |
 | STM32U5 | `Dev/STM32U5` | `PKA` on the lines that have it | planned |
 | STM32U3 | `Dev/STM32U3` | device dependent | planned |
-| STM32F4, STM32F7, STM32G4, STM32H7, STM32L4 | `Dev/STM32F4` ... | no public key accelerator on the device - the module is a stub that returns `PKA_REQUEST_ERROR` | planned |
+| STM32F4, STM32F7, STM32G4, STM32L4 | `Dev/STM32F4` ... | no public key accelerator on the device - the module is a stub that returns `PKA_REQUEST_ERROR` | planned |
 
 A function without a meaning in a family stays in the interface, returns `PKA_REQUEST_ERROR` and suppresses the unused
 parameters (for example the operation or the operand size the device does not support).
@@ -217,7 +243,7 @@ const pka_RsaCrtRequest_t request =
 
 - **Rcc** - peripheral clock and reset
 - **Nvic** - interrupt of the peripheral
-- **Rng** - (the caller) the random number `k` of the ECDSA
+- **Rng** - (the caller) the random number `k` of the ECDSA; the RNG has to be clocked and enabled (`Rng_Init`, `Rng_Set_ExecActive`) before `Pka_Init`, otherwise PKA_SR.INITOK is never set (RM0481 PKA_SR.INITOK, RM0477 40.3.6)
 - **RAL (Register Abstraction Layer)** - used internally to access the registers
 
 All mandatory RCC and NVIC configurations are handled internally.
