@@ -570,7 +570,7 @@ static void ItPka_Init_Module( void )
 
 
 /**
- * rief Ignores the test when the operation is not available on the tested line: the PKA of H523, H543, H562 and
+ * \brief Ignores the test when the operation is not available on the tested line: the PKA of H523, H543, H562 and
  *        H563 works in the limited mode, only the ECDSA verification is available (RM0481 41.3, PKA_SR.LMF).
  *
  * \param operation [in]: Operation the test needs
